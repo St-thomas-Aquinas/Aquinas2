@@ -1,37 +1,32 @@
 from twilio.twiml.messaging_response import MessagingResponse
 from flask import Flask, request
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, logging
-
-logging.set_verbosity_error()  # suppress HF warnings
+import requests
+import os
 
 app = Flask(__name__)
 
-# --- Load model from Hugging Face Hub ---
-hf_model_id = "ST-THOMAS-OF-AQUINAS/SCAM"  # ✅ your uploaded repo
-tokenizer = AutoTokenizer.from_pretrained(hf_model_id, use_fast=True)
-model = AutoModelForSequenceClassification.from_pretrained(hf_model_id)
-model.eval()
+# --- Hugging Face Inference API ---
+HF_MODEL_ID = "ST-THOMAS-OF-AQUINAS/SCAM"  # your model repo
+HF_API_KEY = os.environ.get("HF_API_KEY")  # ✅ Load from Render env
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-
-# Example label map (update to match your training labels)
-label_map = {0: "author1", 1: "author2"}
+API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
+headers = {"Authorization": f"Bearer {HF_API_KEY}"}
 
 
 def predict_author(text):
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    payload = {"inputs": text}
+    response = requests.post(API_URL, headers=headers, json=payload)
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-        pred = torch.argmax(probs, dim=1).item()
-        confidence = probs[0][pred].item()
+    if response.status_code != 200:
+        return f"Error {response.status_code}", 0
 
-    predicted_author = label_map[pred]
-    return predicted_author, round(confidence * 100, 2)
+    result = response.json()
+    # Example: [{"label": "author1", "score": 0.93}, {"label": "author2", "score": 0.07}]
+    if isinstance(result, list) and len(result) > 0:
+        pred = max(result, key=lambda x: x["score"])
+        return pred["label"], round(pred["score"] * 100, 2)
+    else:
+        return "Unknown", 0
 
 
 # --- Twilio Webhook ---
@@ -50,14 +45,12 @@ def whatsapp_reply():
     return str(resp)
 
 
-# --- Health check route ---
+# --- Health check ---
 @app.route("/")
 def home():
-    return "✅ Twilio + HuggingFace WhatsApp bot is running on Render!"
+    return "✅ Twilio + HuggingFace Inference API bot is running on Render!"
 
 
 if __name__ == "__main__":
-    # On Render, Flask binds to 0.0.0.0 and PORT from env
-    import os
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Render provides PORT env
     app.run(host="0.0.0.0", port=port, debug=False)

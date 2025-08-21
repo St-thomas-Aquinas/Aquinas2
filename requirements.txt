@@ -1,6 +1,4 @@
 flask
-torch
-transformers
 twilio
+requests
 gunicorn
-protobuf
