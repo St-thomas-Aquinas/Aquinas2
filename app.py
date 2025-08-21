@@ -1,15 +1,14 @@
 from twilio.twiml.messaging_response import MessagingResponse
 from flask import Flask, request
 import torch
-import os
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, logging
 
 logging.set_verbosity_error()  # suppress HF warnings
 
 app = Flask(__name__)
 
-# --- Load latest model from Hugging Face ---
-hf_model_id = "ST-THOMAS-OF-AQUINAS/SCAM"  # Replace with your Hugging Face repo
+# --- Load model from Hugging Face Hub ---
+hf_model_id = "ST-THOMAS-OF-AQUINAS/SCAM"  # ✅ your uploaded repo
 tokenizer = AutoTokenizer.from_pretrained(hf_model_id, use_fast=True)
 model = AutoModelForSequenceClassification.from_pretrained(hf_model_id)
 model.eval()
@@ -17,8 +16,8 @@ model.eval()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-# Example label map (update with your labels)
-label_map = {"author1": 0, "author2": 1}
+# Example label map (update to match your training labels)
+label_map = {0: "author1", 1: "author2"}
 
 
 def predict_author(text):
@@ -31,7 +30,7 @@ def predict_author(text):
         pred = torch.argmax(probs, dim=1).item()
         confidence = probs[0][pred].item()
 
-    predicted_author = list(label_map.keys())[list(label_map.values()).index(pred)]
+    predicted_author = label_map[pred]
     return predicted_author, round(confidence * 100, 2)
 
 
@@ -45,7 +44,7 @@ def whatsapp_reply():
         author, confidence = predict_author(incoming_msg)
         reply = f"Prediction: {author}\nConfidence: {confidence}%"
     else:
-        reply = "No text detected."
+        reply = "⚠️ No text detected."
 
     resp.message(reply)
     return str(resp)
@@ -57,6 +56,8 @@ def home():
     return "✅ Twilio + HuggingFace WhatsApp bot is running on Render!"
 
 
-
 if __name__ == "__main__":
-    app.run(debug=True)
+    # On Render, Flask binds to 0.0.0.0 and PORT from env
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
